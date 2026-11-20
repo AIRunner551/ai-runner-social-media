@@ -40,3 +40,10 @@ grant all on public.ig_ref_posts, public.ig_ref_historico to service_role;
 -- atualização automática a cada 6 horas
 select cron.unschedule('ig_radar_6h') where exists (select 1 from cron.job where jobname = 'ig_radar_6h');
 select cron.schedule('ig_radar_6h', '25 */6 * * *', $$ select public.ig_chamar('ig-api/radar/atualizar', '{}'::jsonb) $$);
+
+-- Radar: histórico completo de posts de cada perfil (20/11/2026)
+alter table public.ig_perfis_ref
+  add column if not exists hist_cursor text, add column if not exists hist_completo boolean default false, add column if not exists hist_em timestamptz;
+create index if not exists ig_ref_posts_views on public.ig_ref_posts (conta_id, perfil, views desc nulls last);
+select cron.unschedule('ig_radar_hist') where exists (select 1 from cron.job where jobname = 'ig_radar_hist');
+select cron.schedule('ig_radar_hist', '*/30 * * * *', $$ select public.ig_chamar('ig-api/radar/historico', '{}'::jsonb) $$);
