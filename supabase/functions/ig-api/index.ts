@@ -13,7 +13,7 @@ import { ETAPAS, limiteDiario, PLAYBOOK_IA, STORY_CAPTURA } from "../_shared/pla
 import { parseJSON } from "../_shared/ig.ts";
 import { tkCriador, tkEnviarVideo, TkOpcoes, tkStatus, tkToken } from "../_shared/tiktok.ts";
 import { BLOCO_POR_FLUXO, FLUXOS_PADRAO, Fluxo, Passo, preencher, proximaMensagem, temPlaceholder, TIPO_PARA_ACAO } from "../_shared/fluxos.ts";
-import { descobrirLocal, radarAtualizar, radarLocal } from "../_shared/radar.ts";
+import { descobrirLocal, paginaLocal, radarAtualizar, radarHistorico, radarLocal } from "../_shared/radar.ts";
 import { painelVerificar } from "../_shared/hub.ts";
 
 type Row = Record<string, unknown>;
@@ -35,6 +35,14 @@ Deno.serve(async (req) => {
     const perfis: Row[] = [];
     for (const u of ((b.usernames || []) as unknown[]).slice(0, 10)) perfis.push(await descobrirLocal(String(u)));
     return json({ perfis });
+  }
+  if (rota === "/radar/pagina" && req.method === "POST" && req.headers.get("x-painel")) {
+    const raw = await req.text();
+    if (!(await painelVerificar(String(req.headers.get("x-painel")), raw, req.headers.get("x-painel-assinatura")))) return json({ erro: "assinatura inválida" }, 403);
+    const b = JSON.parse(raw);
+    if (Math.abs(Date.now() - Number(b.ts)) > 5 * 60000) return json({ erro: "pedido vencido" }, 403);
+    if (!radarLocal()) return json({ erro: "o hub ainda não tem o token do Facebook (IG_FB_TOKEN)" }, 503);
+    return json(await paginaLocal(String(b.username || ""), b.after ? String(b.after) : null));
   }
 
   const cron = req.headers.get("x-cron") === CRON_SECRET && !!CRON_SECRET;
@@ -68,6 +76,7 @@ Deno.serve(async (req) => {
       case "/ref/analisar": return json(await analisarReferencias(String(body.conta_id || ""), Number(body.limite) || 5));
       case "/ref/roteiro": return json(await roteiroDaReferencia(String(body.referencia_id), user.email));
       case "/fluxos/padrao": return json(FLUXOS_PADRAO);
+      case "/radar/historico": return json(await radarHistorico(body.conta_id ? String(body.conta_id) : undefined, body.username ? String(body.username) : undefined, Math.min(Number(body.paginas) || 25, 40)));
       case "/radar/atualizar": return json(await radarAtualizar(body.conta_id ? String(body.conta_id) : undefined, Array.isArray(body.usernames) ? (body.usernames as unknown[]).map(String) : undefined));
       case "/fluxos/executar": return json(await executarFluxos(String(body.conta_id || "")));
       case "/fluxos/reescrever": return json(await reescreverTextos(String(body.conta_id || ""), body.acao_id ? String(body.acao_id) : null, !!body.todas, Number(body.limite) || 6));
