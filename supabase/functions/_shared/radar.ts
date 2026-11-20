@@ -79,6 +79,15 @@ export async function descobrir(usernames: string[]): Promise<Row[]> {
 }
 
 const num = (v: unknown) => (v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
+async function gravarPosts(cid: string, u: string, posts: Row[], agora: string): Promise<string | null> {
+  if (!posts.length) return null;
+  const { error } = await admin().from("ig_ref_posts").upsert(posts.map((m) => ({
+    conta_id: cid, id: String(m.id), perfil: u, permalink: m.permalink ?? null, tipo: m.media_type ?? null, produto: m.media_product_type ?? null,
+    legenda: String(m.caption || "").slice(0, 2200), curtidas: num(m.like_count), comentarios: num(m.comments_count), views: num(m.view_count),
+    thumb: (m.thumbnail_url || (m.media_type === "IMAGE" ? m.media_url : null)) ?? null, publicado_em: m.timestamp ?? null, atualizado_em: agora,
+  })), { onConflict: "conta_id,id" });
+  return error ? error.message : null;
+}
 const media = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
 // Atualiza os perfis de referência de uma conta (ou de todas): perfil, posts com métricas e histórico do dia.
@@ -114,18 +123,95 @@ export async function radarAtualizar(conta_id?: string, so?: string[]) {
         radar_em: agora, radar_erro: null,
       };
       await db.from("ig_perfis_ref").update(perfil).eq("conta_id", cid).eq("username", u);
-      if (posts.length) {
-        const { error } = await db.from("ig_ref_posts").upsert(posts.map((m) => ({
-          conta_id: cid, id: String(m.id), perfil: u, permalink: m.permalink ?? null, tipo: m.media_type ?? null, produto: m.media_product_type ?? null,
-          legenda: String(m.caption || "").slice(0, 2200), curtidas: num(m.like_count), comentarios: num(m.comments_count), views: num(m.view_count),
-          thumb: (m.thumbnail_url || (m.media_type === "IMAGE" ? m.media_url : null)) ?? null, publicado_em: m.timestamp ?? null, atualizado_em: agora,
-        })), { onConflict: "conta_id,id" });
-        if (error) resumo.erros.push(`@${u} posts: ${error.message}`);
-      }
+      const ePosts = await gravarPosts(cid, u, posts, agora);
+      if (ePosts) resumo.erros.push(`@${u} posts: ${ePosts}`);
       await db.from("ig_ref_historico").upsert({ conta_id: cid, perfil: u, data: hoje, seguidores, posts: num(p.media_count), eng_medio: eng, views_medio: views }, { onConflict: "conta_id,perfil,data" });
       resumo.perfis++; resumo.posts += posts.length;
     }
   }
   await log("radar", conta_id || null, resumo);
   return resumo;
+}
+
+// ---------- histórico completo: todos os posts de cada perfil, página por página ----------
+// A Meta entrega os posts de um perfil em páginas (cursor). O histórico é carregado aos poucos, a cada 30 min,
+// respeitando o limite de chamadas da conta que consulta; o botão "Carregar tudo" da tela acelera um perfil.
+const LIMITE_CHAMADAS = /\(code (4|17|32|613|80002)\)|rate limit|too many calls|limite de chamadas/i;
+
+export async function paginaLocal(username: string, after: string | null, limite = 100): Promise<Row> {
+  const u = username.replace(/^@/, "").trim().toLowerCase();
+  const ig = await contaConsulta();
+  let ultimo = "";
+  for (const lim of [limite, 50, 25]) {
+    for (const campos of CAMPOS_POSTS) {
+      try {
+        const media = `media${after ? `.after(${after})` : ""}.limit(${lim}){${campos}}`;
+        const j = await fb(ig, { fields: `business_discovery.username(${u}){followers_count,${media}}` });
+        const m = ((j.business_discovery || {}) as Row).media as Row | undefined;
+        const paging = (m?.paging || {}) as Row;
+        const posts = (m?.data as Row[]) || [];
+        // a Business Discovery nem sempre manda "next": segue pelo marcador enquanto a página vier cheia
+        const depois = ((paging.cursors as Row)?.after as string) || null;
+        const next = depois && depois !== after && posts.length > 0 && (paging.next || posts.length >= lim) ? depois : null;
+        return { username: u, posts, next };
+      } catch (e) {
+        ultimo = String(e);
+        if (/nonexisting field|Tried accessing nonexisting|not supported/i.test(ultimo)) continue; // tenta menos campos
+        if (/reduce the amount of data|Please reduce/i.test(ultimo)) break; // tenta páginas menores
+        return { username: u, erro: ultimo.replace(/^Error:\s*/, "").slice(0, 220) };
+      }
+    }
+  }
+  return { username: u, erro: ultimo.replace(/^Error:\s*/, "").slice(0, 220) };
+}
+
+export async function pagina(username: string, after: string | null): Promise<Row> {
+  if (radarLocal()) return paginaLocal(username, after);
+  const [hub, nome] = await Promise.all([hubDoPainel(), nomeDoPainel()]);
+  if (!hub || !nome) throw new Error("radar sem consulta: falta o token do Facebook (IG_FB_TOKEN) neste projeto ou um hub configurado");
+  const corpo = JSON.stringify({ ts: Date.now(), username, after });
+  const r = await fetch(`${hub}/ig-api/radar/pagina`, {
+    method: "POST", headers: { "Content-Type": "application/json", "x-painel": nome, "x-painel-assinatura": await hubAssinar(corpo) },
+    body: corpo, signal: AbortSignal.timeout(60000),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || (j.erro && !j.username)) throw new Error("hub: " + (j.erro || r.status));
+  return j;
+}
+
+// Avança o histórico dos perfis que ainda não estão completos (ou de um perfil só), dentro de um tempo e de um número de páginas.
+export async function radarHistorico(conta_id?: string, username?: string, maxPaginas = 25, orcamentoMs = 100000) {
+  const db = admin();
+  const t0 = Date.now();
+  let q = db.from("ig_perfis_ref").select("conta_id,username,hist_cursor,hist_completo").or("hist_completo.is.null,hist_completo.eq.false");
+  if (conta_id) q = q.eq("conta_id", conta_id);
+  if (username) q = q.eq("username", username.replace(/^@/, "").toLowerCase());
+  const { data } = await q;
+  const fila = [...new Map((data || []).map((r) => [`${r.conta_id}|${String(r.username).toLowerCase()}`, r])).values()];
+  const out = { paginas: 0, posts: 0, completos: [] as string[], pendentes: 0, parou: "" };
+  for (const r of fila) {
+    const cid = String(r.conta_id), u = String(r.username).toLowerCase();
+    let cursor = (r.hist_cursor as string) || null;
+    while (out.paginas < maxPaginas && Date.now() - t0 < orcamentoMs) {
+      const p = await pagina(u, cursor);
+      out.paginas++;
+      if (p.erro) {
+        await db.from("ig_perfis_ref").update({ radar_erro: String(p.erro), hist_em: new Date().toISOString() }).eq("conta_id", cid).eq("username", u);
+        if (LIMITE_CHAMADAS.test(String(p.erro))) { out.parou = "limite de chamadas da Meta; continua na próxima rodada"; break; }
+        break;
+      }
+      const agora = new Date().toISOString();
+      const posts = (p.posts as Row[]) || [];
+      await gravarPosts(cid, u, posts, agora);
+      out.posts += posts.length;
+      cursor = (p.next as string) || null;
+      await db.from("ig_perfis_ref").update({ hist_cursor: cursor, hist_completo: !cursor, hist_em: agora }).eq("conta_id", cid).eq("username", u);
+      if (!cursor) { out.completos.push(u); break; }
+    }
+    if (out.parou || out.paginas >= maxPaginas || Date.now() - t0 >= orcamentoMs) break;
+  }
+  const { count } = await db.from("ig_perfis_ref").select("id", { count: "exact", head: true }).or("hist_completo.is.null,hist_completo.eq.false").match(conta_id ? { conta_id } : {});
+  out.pendentes = count || 0;
+  if (out.paginas) await log("radar", conta_id || null, { historico: out });
+  return out;
 }
