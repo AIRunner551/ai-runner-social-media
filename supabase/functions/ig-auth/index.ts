@@ -7,7 +7,10 @@
 // Secrets: IG_APP_ID, IG_APP_SECRET, IG_APP_URL (front), IG_CRON_SECRET
 import { admin, APP_ID, APP_SECRET, APP_URL, CORS, CRON_SECRET, graph, graphPost, html, json, log, SCOPES, SUPABASE_URL, tokenDaConta } from "../_shared/ig.ts";
 
+import { ehHub, hubAssinar, hubChavePublica, hubDoPainel, hubVerificar, nomeDoPainel, painelDoHub } from "../_shared/hub.ts";
+
 const REDIRECT = `${SUPABASE_URL}/functions/v1/ig-auth/callback`;
+const CAMPOS_WEBHOOK = "comments,messages,message_reactions,messaging_postbacks,messaging_seen";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -15,8 +18,17 @@ Deno.serve(async (req) => {
   const rota = url.pathname.split("/ig-auth")[1] || "/";
 
   if (rota === "/start") {
+    const quem = url.searchParams.get("u") || "";
+    // Painel sem a chave secreta do aplicativo: quem conclui o login do Instagram é o hub (o projeto que guarda a chave).
+    if (!APP_SECRET) {
+      const [hub, nome] = await Promise.all([hubDoPainel(), nomeDoPainel()]);
+      if (hub && nome) return Response.redirect(`${hub}/ig-auth/start?painel=${encodeURIComponent(nome)}&u=${encodeURIComponent(quem)}`, 302);
+    }
     if (!APP_ID) return html(pagina("Falta configurar IG_APP_ID e IG_APP_SECRET nos secrets do Supabase."), 500);
-    const state = url.searchParams.get("u") || "";
+    // Pedido de outro painel (só os listados em IG_PAINEIS): o nome dele viaja no state e volta no callback.
+    const painel = url.searchParams.get("painel") || "";
+    if (painel && !painelDoHub(painel)) return html(pagina("Painel desconhecido: " + painel), 400);
+    const state = painel ? `p:${painel}|${quem}` : quem;
     const auth = new URL("https://www.instagram.com/oauth/authorize");
     auth.searchParams.set("client_id", APP_ID);
     auth.searchParams.set("redirect_uri", REDIRECT);
@@ -52,6 +64,7 @@ Deno.serve(async (req) => {
         await log("erro", null, { onde: "me", erro: String(e1) });
         try { me = await graph(String(j1.user_id), token, { fields: campos }); }
         catch (e2) {
+          if ((url.searchParams.get("state") || "").startsWith("p:")) throw e2; // conta de outro painel: nada dela fica guardado aqui
           // guarda o token mesmo assim para diagnóstico (conta fica marcada como pendente)
           const pid = String(j1.user_id);
           await admin().from("ig_contas").upsert({ id: pid, username: "pendente_" + pid, ativo: false, token_expira: expira, erro_sync: String(e2).slice(0, 300) });
@@ -60,6 +73,21 @@ Deno.serve(async (req) => {
         }
       }
       const id = String(me.user_id || me.id || j1.user_id);
+      // Login feito a pedido de outro painel: a conta e o token seguem assinados para lá e NÃO são guardados neste projeto.
+      const paraPainel = (url.searchParams.get("state") || "").match(/^p:([A-Za-z0-9_-]+)\|(.*)$/);
+      if (paraPainel) {
+        const destino = painelDoHub(paraPainel[1]);
+        if (!destino) throw new Error("painel desconhecido: " + paraPainel[1]);
+        let webhook_ok = false;
+        try { await graphPost(`${id}/subscribed_apps`, token, { subscribed_fields: CAMPOS_WEBHOOK }); webhook_ok = true; }
+        catch (e) { await log("erro", null, { onde: "subscribed_apps (painel " + paraPainel[1] + ")", erro: String(e).slice(0, 200) }); }
+        const corpo = JSON.stringify({ ts: Date.now(), quem: paraPainel[2], token, expira, permissoes: j1.permissions || [], webhook_ok,
+          conta: { id, username: me.username, nome: me.name, foto: me.profile_picture_url, biografia: me.biography, seguidores: me.followers_count, seguindo: me.follows_count, midias: me.media_count } });
+        const r = await fetch(destino.adotar, { method: "POST", headers: { "Content-Type": "application/json", "x-hub-assinatura": await hubAssinar(corpo) }, body: corpo });
+        if (!r.ok) throw new Error(`o painel ${paraPainel[1]} não aceitou a conta (${r.status}): ${(await r.text()).slice(0, 200)}`);
+        await log("auth", null, { painel: paraPainel[1], username: me.username, webhook_ok });
+        return Response.redirect(`${destino.app}/?conectado=${encodeURIComponent(String(me.username))}`, 302);
+      }
       const db = admin();
       await db.from("ig_contas").upsert({
         id, username: me.username, nome: me.name, foto: me.profile_picture_url, biografia: me.biography,
@@ -79,7 +107,7 @@ Deno.serve(async (req) => {
       // 4) assina webhooks de comentários e mensagens
       let webhook_ok = false;
       try {
-        await graphPost(`${id}/subscribed_apps`, token, { subscribed_fields: "comments,messages,message_reactions,messaging_postbacks,messaging_seen" });
+        await graphPost(`${id}/subscribed_apps`, token, { subscribed_fields: CAMPOS_WEBHOOK });
         webhook_ok = true;
       } catch (e) { await log("erro", id, { onde: "subscribed_apps", erro: String(e) }); }
       await db.from("ig_contas").update({ webhook_ok }).eq("id", id);
@@ -91,6 +119,46 @@ Deno.serve(async (req) => {
       await log("erro", null, { onde: "callback", erro: String(e) });
       return html(pagina(`Não consegui concluir a conexão: ${String(e)}`), 500);
     }
+  }
+
+  // ---------- hub: chave pública e teste do caminho até um painel ----------
+  if (rota === "/chave") return ehHub() ? json(await hubChavePublica()) : json({ erro: "este projeto não é hub" }, 404);
+  if (rota === "/hub-teste" && req.method === "POST") {
+    if (!CRON_SECRET || req.headers.get("x-cron") !== CRON_SECRET) return json({ erro: "não autorizado" }, 401);
+    const { painel } = await req.json().catch(() => ({}));
+    const destino = painelDoHub(String(painel || ""));
+    if (!destino) return json({ erro: "painel desconhecido" }, 400);
+    const corpo = JSON.stringify({ ts: Date.now(), ping: true });
+    const r = await fetch(destino.adotar, { method: "POST", headers: { "Content-Type": "application/json", "x-hub-assinatura": await hubAssinar(corpo) }, body: corpo });
+    return json({ status: r.status, resposta: (await r.text()).slice(0, 200) });
+  }
+
+  // ---------- painel: recebe do hub a conta que acabou de autorizar (assinada pelo hub) ----------
+  if (rota === "/adotar" && req.method === "POST") {
+    const raw = await req.text();
+    if (!(await hubVerificar(raw, req.headers.get("x-hub-assinatura")))) return json({ erro: "assinatura inválida" }, 403);
+    const b = JSON.parse(raw);
+    if (Math.abs(Date.now() - Number(b.ts)) > 5 * 60000) return json({ erro: "pedido vencido" }, 403);
+    if (b.ping) return json({ ok: true, ping: true });
+    const c = b.conta || {};
+    const id = String(c.id || "");
+    if (!id || !b.token) return json({ erro: "conta ou token ausente" }, 400);
+    const db = admin();
+    await db.from("ig_contas").upsert({
+      id, username: c.username, nome: c.nome, foto: c.foto, biografia: c.biografia, seguidores: c.seguidores, seguindo: c.seguindo, midias: c.midias,
+      ativo: true, conectado_em: new Date().toISOString(), token_expira: b.expira, erro_sync: null, webhook_ok: !!b.webhook_ok,
+    });
+    await db.from("ig_tokens").upsert({ conta_id: id, access_token: b.token, expira_em: b.expira, permissoes: (b.permissoes || []) as string[], atualizado_em: new Date().toISOString() });
+    const { data: cz } = await db.from("ig_contas").select("config").eq("id", id).maybeSingle();
+    if (!cz?.config || !Object.keys(cz.config as Record<string, unknown>).length) await db.from("ig_contas").update({ config: { perfil: "conteudo", auto: false, modo: "aprovacao", sem_story_captura: true } }).eq("id", id);
+    const quem = String(b.quem || "").trim().toLowerCase();
+    if (quem) {
+      const { data: ac } = await db.from("ig_acesso").select("email,contas").ilike("email", quem).maybeSingle();
+      if (ac && Array.isArray(ac.contas) && !ac.contas.includes(id)) await db.from("ig_acesso").update({ contas: [...ac.contas, id] }).eq("email", ac.email);
+    }
+    await log("auth", id, { username: c.username, expira: b.expira, webhook_ok: !!b.webhook_ok, via: "hub" });
+    fetch(`${SUPABASE_URL}/functions/v1/ig-api/sync`, { method: "POST", headers: { "x-cron": CRON_SECRET, "Content-Type": "application/json" }, body: JSON.stringify({ conta_id: id, completo: true }) }).catch(() => {});
+    return json({ ok: true });
   }
 
   if (rota === "/refresh" && req.method === "POST") {
