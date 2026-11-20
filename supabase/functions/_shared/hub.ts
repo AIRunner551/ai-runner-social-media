@@ -1,7 +1,8 @@
 // Um aplicativo da Meta, vários painéis.
-// O projeto que guarda a chave secreta do aplicativo é o "hub": ele conclui o login do Instagram e repassa os eventos,
-// assinando tudo com uma chave própria (ECDSA P-256). Os outros painéis NÃO recebem a chave secreta do aplicativo:
-// só conferem a assinatura com a chave pública do hub, que é publicada em <hub>/ig-auth/chave.
+// O projeto que guarda a chave secreta do aplicativo é o "hub": ele conclui o login do Instagram, repassa os eventos e
+// faz as consultas oficiais de perfis de referência (radar), assinando tudo com uma chave própria (ECDSA P-256).
+// Cada projeto tem o seu par de chaves (gerado na primeira vez e guardado em ig_interno) e publica a pública em
+// <funções>/ig-auth/chave. Os painéis NÃO recebem a chave secreta do aplicativo nem o token do Facebook.
 import { admin } from "./ig.ts";
 
 const ALG = { name: "ECDSA", namedCurve: "P-256" } as const;
@@ -44,16 +45,26 @@ export const ehHub = () => !!Deno.env.get("IG_PAINEIS");
 // ig_interno: 'hub' = endereço das funções do hub (https://<projeto-hub>.supabase.co/functions/v1); 'painel' = o nome deste painel no hub
 export const hubDoPainel = async () => (await valorInterno("hub")).replace(/\/$/, "");
 export const nomeDoPainel = () => valorInterno("painel");
-let pubCache: { hub: string; key: CryptoKey; em: number } | null = null;
-export async function hubVerificar(corpo: string, assinatura: string | null): Promise<boolean> {
-  if (!assinatura) return false;
+// Confere uma assinatura feita por outro projeto, com a chave pública que ele publica em <base>/ig-auth/chave.
+const pubCache = new Map<string, { key: CryptoKey; em: number }>();
+export async function verificarDe(base: string, corpo: string, assinatura: string | null): Promise<boolean> {
+  if (!assinatura || !base) return false;
   try {
-    const hub = await hubDoPainel();
-    if (!hub) return false;
-    if (!pubCache || pubCache.hub !== hub || Date.now() - pubCache.em > 3600_000) {
-      const jwk = await (await fetch(hub + "/ig-auth/chave", { signal: AbortSignal.timeout(8000) })).json();
-      pubCache = { hub, key: await crypto.subtle.importKey("jwk", jwk, ALG, false, ["verify"]), em: Date.now() };
+    let c = pubCache.get(base);
+    if (!c || Date.now() - c.em > 3600_000) {
+      const jwk = await (await fetch(base.replace(/\/$/, "") + "/ig-auth/chave", { signal: AbortSignal.timeout(8000) })).json();
+      c = { key: await crypto.subtle.importKey("jwk", jwk, ALG, false, ["verify"]), em: Date.now() };
+      pubCache.set(base, c);
     }
-    return await crypto.subtle.verify(SIG, pubCache.key, deB64(assinatura), new TextEncoder().encode(corpo));
+    return await crypto.subtle.verify(SIG, c.key, deB64(assinatura), new TextEncoder().encode(corpo));
   } catch { return false; }
+}
+// painel: confere o que veio do hub
+export async function hubVerificar(corpo: string, assinatura: string | null): Promise<boolean> {
+  return verificarDe(await hubDoPainel(), corpo, assinatura);
+}
+// hub: confere o que veio de um painel (a base das funções dele sai do endereço "adotar" em IG_PAINEIS)
+export async function painelVerificar(nome: string, corpo: string, assinatura: string | null): Promise<boolean> {
+  const p = painelDoHub(nome);
+  return p ? verificarDe(p.adotar.replace(/\/ig-auth\/adotar$/, ""), corpo, assinatura) : false;
 }
