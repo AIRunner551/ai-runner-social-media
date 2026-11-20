@@ -7,7 +7,7 @@
 // Secrets: IG_APP_ID, IG_APP_SECRET, IG_APP_URL (front), IG_CRON_SECRET
 import { admin, APP_ID, APP_SECRET, APP_URL, CORS, CRON_SECRET, graph, graphPost, html, json, log, SCOPES, SUPABASE_URL, tokenDaConta } from "../_shared/ig.ts";
 
-import { ehHub, hubAssinar, hubChavePublica, hubDoPainel, hubVerificar, nomeDoPainel, painelDoHub } from "../_shared/hub.ts";
+import { hubAssinar, hubChavePublica, hubDoPainel, hubVerificar, nomeDoPainel, painelDoHub } from "../_shared/hub.ts";
 
 const REDIRECT = `${SUPABASE_URL}/functions/v1/ig-auth/callback`;
 const CAMPOS_WEBHOOK = "comments,messages,message_reactions,messaging_postbacks,messaging_seen";
@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
   }
 
   // ---------- hub: chave pública e teste do caminho até um painel ----------
-  if (rota === "/chave") return ehHub() ? json(await hubChavePublica()) : json({ erro: "este projeto não é hub" }, 404);
+  if (rota === "/chave") return json(await hubChavePublica()); // chave pública deste projeto (hub ou painel)
   if (rota === "/hub-teste" && req.method === "POST") {
     if (!CRON_SECRET || req.headers.get("x-cron") !== CRON_SECRET) return json({ erro: "não autorizado" }, 401);
     const { painel } = await req.json().catch(() => ({}));
