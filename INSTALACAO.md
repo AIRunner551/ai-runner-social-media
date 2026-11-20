@@ -1,78 +1,82 @@
 # Instalação do AI Runner Social Media
 
-O app nasce vazio: sem contas conectadas, sem leads e sem histórico. Siga na ordem.
+O app nasce vazio: sem contas conectadas, sem leads e sem histórico.
 
-## 1. Supabase (banco, login e servidor)
+## Situação em 20/11/2026
 
-1. Crie um projeto em supabase.com (região São Paulo). Anote o código do projeto, que aparece no endereço `https://CODIGO.supabase.co`.
-2. Em **SQL Editor**, cole e rode o arquivo `supabase/schema.sql` inteiro.
-3. Em **Authentication › Users**, crie o seu usuário (e-mail e senha).
-4. No SQL Editor, libere o seu e-mail como admin:
-   ```sql
-   insert into public.ig_acesso (email, nome, papel) values ('SEU_EMAIL', 'Admin', 'admin');
-   ```
-5. Em **Project Settings › API**, copie a **Project URL** e a chave **anon public**.
-
-## 2. Segredos das funções
-
-Em **Edge Functions › Secrets**, crie:
-
-| Nome | De onde vem |
+| Etapa | Estado |
 |---|---|
-| `IG_APP_ID` | ID do app do Instagram, no painel da Meta (passo 4) |
-| `IG_APP_SECRET` | Chave secreta do app do Instagram |
-| `IG_WEBHOOK_VERIFY` | Uma frase que você inventa. A mesma vai no painel da Meta |
-| `IG_CRON_SECRET` | Uma senha longa que você inventa. A mesma vai no `rotinas.sql` |
-| `IG_APP_URL` | Endereço público do app, sem barra no fim. Ex.: `https://USUARIO.github.io/ai-runner-social-media` |
-| `GEMINI_API_KEY` | Chave do Google AI Studio (sugestões de resposta, roteiros e legendas) |
-| `TIKTOK_CLIENT_KEY` | Client key do app no TikTok for Developers (passo 5) |
-| `TIKTOK_CLIENT_SECRET` | Client secret do app no TikTok |
+| Projeto no Supabase (`uopovwfitfklmaiociuk`, São Paulo, plano gratuito) | Feito |
+| Estrutura do banco (`schema.sql`) e rotinas agendadas (`rotinas.sql`) | Feito |
+| Quatro funções publicadas (`ig-auth`, `ig-webhook`, `ig-api`, `tiktok-auth`) | Feito |
+| Tela ligada ao projeto e publicada no GitHub Pages | Feito |
+| E-mail `comercial.airunner@gmail.com` liberado como admin | Feito |
+| Criar o usuário com senha (passo 1) | Falta |
+| Aplicativo na Meta e segredos do Instagram (passo 2) | Falta |
+| Chave do Gemini para a IA (passo 3) | Falta |
+| Aplicativo no TikTok (passo 4) | Falta |
+| Razão social e CNPJ nas páginas legais (passo 5) | Falta |
 
-`SUPABASE_URL`, `SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` já existem sozinhos nas funções.
+Endereço do app: https://airunner551.github.io/ai-runner-social-media/
 
-## 3. Publicar as funções
+## 1. Criar o seu usuário
 
-Com o Supabase CLI instalado e logado, dentro desta pasta:
+No Supabase, em **Authentication › Users › Add user › Create new user**: e-mail `comercial.airunner@gmail.com`, uma senha sua, e marque **Auto Confirm User**. Depois é só entrar no app com esse e-mail e senha.
 
-```bash
-supabase functions deploy ig-auth --project-ref CODIGO --use-api --no-verify-jwt
-```
-```bash
-supabase functions deploy ig-webhook --project-ref CODIGO --use-api --no-verify-jwt
-```
-```bash
-supabase functions deploy ig-api --project-ref CODIGO --use-api --no-verify-jwt
-```
-```bash
-supabase functions deploy tiktok-auth --project-ref CODIGO --use-api --no-verify-jwt
-```
+Para liberar outra pessoa: crie o usuário dela do mesmo jeito e libere o e-mail em Playbook › Equipe (ou na tabela `ig_acesso`). O papel `cliente` enxerga só as contas marcadas para ele.
 
-Depois abra `supabase/rotinas.sql`, troque `SEU-PROJETO` pelo código e `SEGREDO_DO_CRON` pelo valor de `IG_CRON_SECRET`, e rode no SQL Editor. Não suba a versão preenchida para o GitHub.
-
-## 4. Aplicativo na Meta (Instagram)
+## 2. Aplicativo na Meta (Instagram)
 
 1. Em developers.facebook.com, crie um app do tipo **Empresa** e adicione o produto **Instagram** com a opção **API setup with Instagram login**.
-2. Em **Business login settings**, cadastre o redirecionamento: `https://CODIGO.supabase.co/functions/v1/ig-auth/callback`
-3. Em **Webhooks**, aponte para `https://CODIGO.supabase.co/functions/v1/ig-webhook` com o token igual ao `IG_WEBHOOK_VERIFY`. Assine os campos `comments`, `messages`, `message_reactions`, `messaging_postbacks` e `messaging_seen`.
-4. Permissões usadas: `instagram_business_basic`, `instagram_business_manage_messages`, `instagram_business_manage_comments`, `instagram_business_content_publish`, `instagram_business_manage_insights`.
-5. Enquanto o app estiver em modo de desenvolvimento, só entram contas cadastradas como testadoras (Funções do app › Testadores do Instagram). Para qualquer conta entrar, é preciso passar pela revisão da Meta, que pede a política de privacidade (`privacidade.html`) e os termos (`termos.html`) publicados.
+2. Em **Business login settings**, cadastre o redirecionamento:
+   `https://uopovwfitfklmaiociuk.supabase.co/functions/v1/ig-auth/callback`
+3. No Supabase, em **Edge Functions › Secrets**, crie:
+   - `IG_APP_ID`: o ID do app do Instagram
+   - `IG_APP_SECRET`: a chave secreta do app do Instagram
+   - `IG_APP_URL`: `https://airunner551.github.io/ai-runner-social-media` (sem barra no fim)
+4. Em **Webhooks** (no painel da Meta), aponte para
+   `https://uopovwfitfklmaiociuk.supabase.co/functions/v1/ig-webhook`
+   O token de verificação já existe: o banco gerou sozinho. Para ver, rode no SQL Editor:
+   ```sql
+   select valor from public.ig_interno where chave = 'webhook';
+   ```
+   Assine os campos `comments`, `messages`, `message_reactions`, `messaging_postbacks` e `messaging_seen`.
+5. Permissões usadas: `instagram_business_basic`, `instagram_business_manage_messages`, `instagram_business_manage_comments`, `instagram_business_content_publish`, `instagram_business_manage_insights`.
+6. Enquanto o app estiver em modo de desenvolvimento, só entram contas cadastradas como testadoras (Funções do app › Testadores do Instagram). Para qualquer conta entrar, é preciso passar pela revisão da Meta, que pede a política de privacidade e os termos publicados:
+   - https://airunner551.github.io/ai-runner-social-media/privacidade.html
+   - https://airunner551.github.io/ai-runner-social-media/termos.html
+7. No app, clique em **Conectar conta** e entre com o Instagram do AI Runner.
 
-## 5. Aplicativo no TikTok
+## 3. Chave do Gemini
+
+Em aistudio.google.com, gere uma chave de API e grave no Supabase como o segredo `GEMINI_API_KEY`. Sem ela o app funciona, mas as sugestões de resposta, roteiros e legendas por IA ficam desligadas.
+
+## 4. Aplicativo no TikTok
 
 1. Em developers.tiktok.com, crie o app e adicione **Login Kit** e **Content Posting API**.
-2. Redirecionamento: `https://CODIGO.supabase.co/functions/v1/tiktok-auth/callback`
-3. O TikTok pede verificação do domínio do site: ele entrega um arquivo `.txt` para colocar na raiz deste repositório.
-4. Antes da auditoria do TikTok, tudo que o app publica sai privado. Depois de aprovado, passa a sair público.
+2. Redirecionamento: `https://uopovwfitfklmaiociuk.supabase.co/functions/v1/tiktok-auth/callback`
+3. Grave no Supabase os segredos `TIKTOK_CLIENT_KEY` e `TIKTOK_CLIENT_SECRET`.
+4. O TikTok pede verificação do domínio do site: ele entrega um arquivo `.txt` para colocar na raiz deste repositório.
+5. Antes da auditoria do TikTok, tudo que o app publica sai privado. Depois de aprovado, passa a sair público.
 
-## 6. A tela
+## 5. Páginas legais
 
-1. Abra `index.html` e preencha, no começo do script, `SUPA_URL` e `SUPA_ANON` com os valores do passo 1.
-2. Em `termos.html` e `privacidade.html`, troque o trecho entre colchetes pela razão social e CNPJ da empresa.
-3. No GitHub: **Settings › Pages › Deploy from a branch › main › / (root)**.
-4. Abra o endereço do Pages, entre com o usuário do passo 1 e clique em **Conectar conta** para ligar o Instagram do AI Runner.
+Em `termos.html` e `privacidade.html`, troque o trecho entre colchetes pela razão social e CNPJ da empresa.
+
+## Como foi montado (para refazer em outro projeto)
+
+1. **Banco:** rode `supabase/schema.sql` inteiro no SQL Editor de um projeto novo. Depois rode `supabase/rotinas.sql`, trocando `SEU-PROJETO` pelo código do projeto.
+2. **Segredos internos:** o segredo das rotinas agendadas e o token do webhook são gerados pelo próprio banco (tabela `ig_interno`). Ninguém precisa inventar nem copiar.
+3. **Funções:** com o Supabase CLI, dentro desta pasta:
+   ```bash
+   supabase functions deploy ig-auth --project-ref CODIGO --use-api --no-verify-jwt
+   ```
+   Repita para `ig-webhook`, `ig-api` e `tiktok-auth`. Pelo painel também funciona, colando cada função em um arquivo só (o conteúdo de `_shared` no topo) e desligando **Verify JWT with legacy secret** nas configurações da função: elas fazem a própria conferência de acesso.
+4. **Tela:** no começo do script do `index.html`, preencha `SUPA_URL` com o endereço do projeto e `SUPA_ANON` com a chave **publishable** (Project Settings › API Keys). A chave secreta nunca vai na tela.
+5. **GitHub Pages:** Settings › Pages › Deploy from a branch › main › / (root).
 
 ## Bom saber
 
 - Conta recém-conectada entra no modo **Conteúdo** (agenda, direct, comentários, automações, referências, métricas). O modo **Vendas** pode ser ligado em Contas › Modo, voz e pilares.
-- Para dar acesso a outra pessoa: crie o usuário em Authentication › Users e libere o e-mail em Playbook › Equipe (ou direto na tabela `ig_acesso`). Papel `cliente` enxerga só as contas marcadas para ele.
 - A voz da conta (quem é, como fala) fica em Contas › Modo, voz e pilares. Sem isso a IA se apoia só no nome e na bio do perfil.
+- A senha do banco foi gerada pelo Supabase na criação do projeto. O app não usa essa senha; se precisar dela, redefina em Project Settings › Database.

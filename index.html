@@ -311,9 +311,9 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
 <script>
 // ===================== núcleo =====================
 // ====== CONFIGURAÇÃO DO PROJETO (os dois únicos valores que mudam de um projeto para outro) ======
-// Supabase > Project Settings > API: "Project URL" e a chave "anon public". A chave anon é pública por natureza; a service_role NUNCA entra aqui.
-const SUPA_URL='https://COLE-AQUI-O-PROJETO.supabase.co';
-const SUPA_ANON='COLE_AQUI_A_CHAVE_ANON';
+// Supabase > Project Settings > API Keys: endereço do projeto e a chave "publishable". Ela é pública por natureza; a chave secreta NUNCA entra aqui.
+const SUPA_URL='https://uopovwfitfklmaiociuk.supabase.co';
+const SUPA_ANON='sb_publishable_NBVA1II9Zc91bCYq09eZ5Q_OhBbgD62';
 if(SUPA_URL.includes('COLE-AQUI'))document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementById('lerr');if(e)e.textContent='Falta configurar o projeto: preencha SUPA_URL e SUPA_ANON no index.html (veja o INSTALACAO.md).'});
 const FN=SUPA_URL+'/functions/v1';
 const sb=supabase.createClient(SUPA_URL,SUPA_ANON);
