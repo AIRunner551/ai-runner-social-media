@@ -546,7 +546,7 @@ Posts que mais engajaram desta conta (para referência de estilo): ${JSON.string
       .replace("Um deles deve ser de captura (enquete, quiz ou caixinha) com a pergunta pronta.", "Um deles deve pedir interação (enquete, quiz ou caixinha) com a pergunta pronta.")
       .replace("hashtags do nicho", "hashtags do assunto");
   }
-  const out = parseJSON(await gemini(base + "\n" + tarefa + (body.tom ? `\nAjuste de tom pedido: ${body.tom}` : ""), { json: true, temp: 0.8 }));
+  const out = parseJSON(await gemini(base + "\n" + tarefa + (body.tom ? `\nAjuste de tom pedido: ${body.tom}` : ""), { json: true, temp: 0.8, esforco: "medium" }));
   return out;
 }
 
@@ -815,7 +815,7 @@ TAREFA
 Responda SÓ JSON:
 {"analise":{"gancho":"o que ele faz nos 3 primeiros segundos","estrutura":"blocos em 1 a 2 linhas","por_que_funciona":"2 linhas","formato":"ex.: fala para a câmera, b-roll com narração, tela gravada"},
 "titulo":"título interno do nosso vídeo","gancho":"nossa frase de abertura, até 12 palavras","roteiro":"roteiro cena a cena com o texto falado, 20 a 45 segundos","legenda":"legenda de 4 a 8 linhas terminando em pergunta ou CTA","cta":"...","hashtags":"5 a 8 hashtags"}`;
-  const ia = parseJSON(await gemini(prompt, { json: true, temp: 0.8 })) as Row;
+  const ia = parseJSON(await gemini(prompt, { json: true, temp: 0.8, esforco: "medium" })) as Row;
   const roteiro = `${String(ia.roteiro || "")}\n\n(Referência: @${r.perfil} · ${r.permalink || ""})`;
   const { data: pl, error } = await db.from("ig_planejados").insert({ conta_id: r.conta_id, data: somaDias(hoje(), 2), tipo: "reel", status: "rascunho", titulo: String(ia.titulo || "Reel a partir de referência"), gancho: String(ia.gancho || ""), roteiro, legenda: String(ia.legenda || ""), cta: String(ia.cta || ""), hashtags: String(ia.hashtags || ""), canais: ["instagram", "tiktok"], referencia_id, criado_por: quem }).select("id").single();
   if (error) throw error;
