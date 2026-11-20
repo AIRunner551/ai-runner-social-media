@@ -11,10 +11,8 @@ O app nasce vazio: sem contas conectadas, sem leads e sem histórico.
 | Quatro funções publicadas (`ig-auth`, `ig-webhook`, `ig-api`, `tiktok-auth`) | Feito |
 | Tela ligada ao projeto e publicada no GitHub Pages | Feito |
 | Usuário admin `comercial.airunner@gmail.com` convidado por e-mail | Feito, falta você criar a senha (passo 1) |
-| Aplicativo da Meta: o mesmo do Lidera Social, com o retorno do AI Runner cadastrado | Feito |
-| Segredos `IG_APP_ID` e `IG_APP_URL` | Feito |
-| Segredo `IG_APP_SECRET` (passo 2) | Falta |
-| Instagram do AI Runner como testador do aplicativo (passo 2) | Falta |
+| Aplicativo da Meta: o mesmo do Lidera Social, com o login concluído pelo projeto da Lidera | Feito |
+| Convite de testador enviado ao @airunneroficial | Feito, falta aceitar no Instagram (passo 2) |
 | Chave da API do Claude, segredo `ANTHROPIC_API_KEY` (passo 3) | Falta |
 | Aplicativo no TikTok (passo 4) | Falta |
 | Razão social e CNPJ nas páginas legais (passo 5) | Falta |
@@ -29,15 +27,19 @@ Se o link expirar, abra o app, digite o e-mail e clique em **Esqueci minha senha
 
 Para liberar outra pessoa: em Authentication › Users › Add user › Send invitation, mande o convite, e libere o e-mail em Playbook › Equipe (ou na tabela `ig_acesso`). O papel `cliente` enxerga só as contas marcadas para ele.
 
-## 2. Instagram: o mesmo aplicativo da Meta do Lidera Social
+## 2. Conectar o Instagram do AI Runner
 
-O app usa o aplicativo **Lidera Relatórios** (ID do app do Instagram `1093483376382075`). O endereço de retorno do AI Runner já está cadastrado nele e os segredos `IG_APP_ID` e `IG_APP_URL` já estão gravados. Falta:
+1. **Aceitar o convite de testador.** Entre no Instagram como @airunneroficial (pelo navegador é mais fácil) e abra https://www.instagram.com/accounts/manage_access/ . Na aba **Convites para testadores**, aceite o convite do aplicativo "Lidera Relatórios-IG". Isso é necessário porque o aplicativo ainda não concluiu a análise da Meta, então só conecta conta com função nele.
+2. **Conectar.** No app, clique em **Conectar conta** e entre com o @airunneroficial. Na tela de autorização vai aparecer o nome do aplicativo da Lidera. Ao autorizar, você volta para o app com a conta conectada e a primeira sincronização já rodando.
 
-1. **Chave secreta.** Em developers.facebook.com › Lidera Relatórios › Casos de uso › API do Instagram › Configuração da API com login do Instagram, clique em **Mostrar** na "Chave secreta do app do Instagram" e grave o valor no Supabase do AI Runner, em Edge Functions › Secrets, com o nome `IG_APP_SECRET`.
-2. **Testador.** O aplicativo ainda não concluiu a análise da Meta, então só entram contas com função nele. Em Funções do app › Funções, adicione o Instagram do AI Runner como **Testador do Instagram** e aceite o convite no próprio Instagram (Configurações › Apps e sites › Convites para testadores).
-3. No app, clique em **Conectar conta** e entre com o Instagram do AI Runner. Na tela de autorização do Instagram vai aparecer o nome do aplicativo da Lidera.
+### Como funciona por baixo
 
-Sobre o tempo real: um aplicativo da Meta tem um único endereço de webhook, e ele aponta para o Lidera Social. O Lidera Social repassa para cá, com a assinatura original, os eventos das contas que não são dele. Sem o `IG_APP_SECRET` gravado aqui, os eventos repassados são guardados, mas as automações não disparam.
+O app usa o aplicativo **Lidera Relatórios** da Meta (ID do app do Instagram `1093483376382075`), que é o mesmo do Lidera Social. A chave secreta desse aplicativo **não foi copiada para cá**: ela continua só no projeto da Lidera, que funciona como hub.
+
+- **Login.** O botão Conectar manda para o hub (`fvcbxorfstqqeewocxkf`), que conclui o login no Instagram e entrega a conta e o token a este projeto em `ig-auth/adotar`, assinados com a chave do hub (ECDSA P-256). O hub não guarda o token das contas deste painel.
+- **Tempo real.** A Meta entrega os eventos (direct, comentários) no webhook do hub, que confere a assinatura da Meta e repassa para cá os eventos das contas que não são dele, também assinados.
+- **Confiança.** Este projeto só aceita conta ou evento com a assinatura do hub, conferida com a chave pública publicada em `<hub>/ig-auth/chave`. O endereço do hub e o nome deste painel ficam na tabela `ig_interno` (`hub`, `painel`). No hub, a lista de painéis atendidos fica no segredo `IG_PAINEIS`.
+- **Dependência.** Se o projeto da Lidera sair do ar, este app continua abrindo e sincronizando de hora em hora, mas não conecta conta nova nem recebe eventos em tempo real.
 
 ## 3. Chave do Claude
 
@@ -76,5 +78,5 @@ Em `termos.html` e `privacidade.html`, troque o trecho entre colchetes pela raz�
 
 - Conta recém-conectada entra no modo **Conteúdo** (agenda, direct, comentários, automações, referências, métricas). O modo **Vendas** pode ser ligado em Contas › Modo, voz e pilares.
 - A voz da conta (quem é, como fala) fica em Contas › Modo, voz e pilares. Sem isso a IA se apoia só no nome e na bio do perfil.
-- Se um dia este app ganhar um aplicativo próprio na Meta, aponte o webhook dele direto para `.../functions/v1/ig-webhook`; o token de verificação sai de `select valor from public.ig_interno where chave = 'webhook';`.
+- Se um dia este app ganhar um aplicativo próprio na Meta: grave `IG_APP_ID` e `IG_APP_SECRET` nos segredos (com a chave secreta presente, o login deixa de passar pelo hub), aponte o webhook dele direto para `.../functions/v1/ig-webhook` e use como token de verificação o valor de `select valor from public.ig_interno where chave = 'webhook';`.
 - A senha do banco foi gerada pelo Supabase na criação do projeto. O app não usa essa senha; se precisar dela, redefina em Project Settings › Database.
