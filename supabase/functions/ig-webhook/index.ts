@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
   const sig = req.headers.get("x-hub-signature-256");
   // a Meta assina os eventos; chamada interna de teste usa x-cron. Evento sem assinatura não dispara automação (evita webhook forjado).
   const interno = !!CRON_SECRET && req.headers.get("x-cron") === CRON_SECRET;
-  const confiavel = !!sig || interno; // sem assinatura o evento ainda é gravado, mas não dispara automação
+  const confiavel = (!!sig && !!APP_SECRET) || interno; // só vale assinatura que dá para conferir; sem isso o evento é gravado, mas não dispara automação
   const seco = interno && req.headers.get("x-seco") === "1"; // teste interno: acha a regra e registra, sem enviar
   if (sig && APP_SECRET) {
     const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(APP_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -38,6 +38,19 @@ Deno.serve(async (req) => {
 
   let body: Record<string, unknown> = {};
   try { body = JSON.parse(raw); } catch { return json({ ok: false }, 400); }
+  // Um mesmo aplicativo da Meta pode servir a mais de um painel, mas só tem UM endereço de webhook. Evento de conta que não é
+  // deste painel não é gravado aqui: é repassado inteiro (com a assinatura original) para os endereços em IG_WEBHOOK_REPASSE.
+  const idsEvento = ((body.entry as Array<Record<string, unknown>>) || []).map((e) => String(e.id));
+  const { data: minhas } = idsEvento.length ? await admin().from("ig_contas").select("id").in("id", idsEvento) : { data: [] };
+  const conhecidas = new Set((minhas || []).map((c) => String(c.id)));
+  const estranhas = idsEvento.filter((i) => !conhecidas.has(i));
+  if (estranhas.length && sig) {
+    for (const destino of (Deno.env.get("IG_WEBHOOK_REPASSE") || "").split(",").map((x) => x.trim()).filter(Boolean)) {
+      try { await fetch(destino, { method: "POST", headers: { "Content-Type": "application/json", "x-hub-signature-256": sig }, body: raw, signal: AbortSignal.timeout(8000) }); }
+      catch (e) { await log("erro", null, { onde: "webhook.repasse", destino, erro: String(e).slice(0, 200) }); }
+    }
+  }
+  if (!conhecidas.size) return json({ ok: true, repassado: estranhas.length });
   await log("webhook", null, body);
 
   // responde rápido e processa; a Meta reenvia se não receber 200 em alguns segundos
@@ -52,6 +65,7 @@ async function processar(body: Record<string, unknown>, confiavel = false, seco 
     const conta_id = String(entry.id);
     // conta só de conteúdo (config.perfil = "conteudo"): guarda comentários e mensagens, mas não abre lead nem tarefa de social selling
     const { data: ctaCfg } = await db.from("ig_contas").select("config").eq("id", conta_id).maybeSingle();
+    if (!ctaCfg) continue; // conta de outro painel (o evento já foi repassado)
     const soConteudo = ((ctaCfg?.config || {}) as Record<string, unknown>).perfil === "conteudo";
     // --- comentários ---
     for (const ch of (entry.changes as Array<{ field: string; value: Record<string, unknown> }>) || []) {
