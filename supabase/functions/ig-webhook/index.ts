@@ -5,6 +5,7 @@
 // Deploy: supabase functions deploy ig-webhook --project-ref SEU-PROJETO --use-api --no-verify-jwt
 // Na Meta: Callback URL = https://SEU-PROJETO.supabase.co/functions/v1/ig-webhook ; campos: comments, messages
 import { admin, APP_SECRET, CORS, CRON_SECRET, ehDaCasa, graph, graphPost, hoje, json, log, semArroba, SUPABASE_URL, tokenDaConta, VERIFY_TOKEN } from "../_shared/ig.ts";
+import { hubAssinar, hubVerificar } from "../_shared/hub.ts";
 
 // pede à ig-api para pesquisar/triar o lead e colocá-lo no fluxo (sem esperar a resposta)
 function pesquisarAsync(conta_id: string, username: string, fluxo: string, sinal: string) {
@@ -27,7 +28,10 @@ Deno.serve(async (req) => {
   const sig = req.headers.get("x-hub-signature-256");
   // a Meta assina os eventos; chamada interna de teste usa x-cron. Evento sem assinatura não dispara automação (evita webhook forjado).
   const interno = !!CRON_SECRET && req.headers.get("x-cron") === CRON_SECRET;
-  const confiavel = (!!sig && !!APP_SECRET) || interno; // só vale assinatura que dá para conferir; sem isso o evento é gravado, mas não dispara automação
+  // evento repassado pelo hub (o projeto que guarda a chave do aplicativo) chega com a assinatura do hub
+  const hubSig = req.headers.get("x-hub-assinatura");
+  const doHub = hubSig ? await hubVerificar(raw, hubSig) : false;
+  const confiavel = (!!sig && !!APP_SECRET) || interno || doHub; // só vale assinatura que dá para conferir; sem isso o evento é gravado, mas não dispara automação
   const seco = interno && req.headers.get("x-seco") === "1"; // teste interno: acha a regra e registra, sem enviar
   if (sig && APP_SECRET) {
     const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(APP_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -44,9 +48,11 @@ Deno.serve(async (req) => {
   const { data: minhas } = idsEvento.length ? await admin().from("ig_contas").select("id").in("id", idsEvento) : { data: [] };
   const conhecidas = new Set((minhas || []).map((c) => String(c.id)));
   const estranhas = idsEvento.filter((i) => !conhecidas.has(i));
-  if (estranhas.length && sig) {
-    for (const destino of (Deno.env.get("IG_WEBHOOK_REPASSE") || "").split(",").map((x) => x.trim()).filter(Boolean)) {
-      try { await fetch(destino, { method: "POST", headers: { "Content-Type": "application/json", "x-hub-signature-256": sig }, body: raw, signal: AbortSignal.timeout(8000) }); }
+  const destinos = (Deno.env.get("IG_WEBHOOK_REPASSE") || "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (estranhas.length && destinos.length && ((sig && APP_SECRET) || interno)) { // só repassa o que este projeto conferiu
+    const assinatura = await hubAssinar(raw);
+    for (const destino of destinos) {
+      try { await fetch(destino, { method: "POST", headers: { "Content-Type": "application/json", "x-hub-assinatura": assinatura, ...(sig ? { "x-hub-signature-256": sig } : {}) }, body: raw, signal: AbortSignal.timeout(8000) }); }
       catch (e) { await log("erro", null, { onde: "webhook.repasse", destino, erro: String(e).slice(0, 200) }); }
     }
   }
