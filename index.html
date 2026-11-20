@@ -388,7 +388,7 @@ async function badges(){if(!S.conta){S.badges={};renderNav();return}const cid=S.
   sb.from('ig_seguidores').select('username',{count:'exact',head:true}).eq('conta_id',cid).gte('primeiro_em',somaDias(hoje(),-1)),
   sb.from('ig_acoes').select('id',{count:'exact',head:true}).eq('conta_id',cid).eq('status','pendente').eq('automatico',true).eq('aprovado',false)]);
   S.badges={hoje:a.count||0,inbox:i.count||0,coment:c.count||0,seguidores:sg.count||0,aprovar:ap.count||0};renderNav()}
-function renderNav(){const b=S.badges||{};const item=(t,n,i,k)=>`<a href="#${t}" class="${S.aba===t?'on':''}" onclick="aba('${t}');return false">${ic(i)}<span>${n}</span>${b[t]?`<span class="badge">${b[t]}</span>`:`<span class="kbd">${k}</span>`}</a>`;
+function renderNav(){const b=S.badges||{};const item=(t,n,i,k)=>`<a href="#${t}" class="${S.aba===t?'on':''}" onclick="aba('${t}');return false">${ic(i)}<span>${n}</span>${b[t]?`<span class="badge">${b[t]}</span>`:''}</a>`;
   const vis=(a,b)=>TELAS.slice(a,b).filter(t=>telaVisivel(t[0])).map(t=>item(...t)).join('');
   $('#snav').innerHTML=`<div class="sec">${ehConteudo()?'Dia a dia':'Operação'}</div>${vis(0,7)}<div class="sec">${ehConteudo()?'Conteúdo':'Crescimento'}</div>${vis(7,12)}<div class="sec">Sistema</div>${vis(12)}`;
   const bn=ehConteudo()?[['hoje','Hoje','hoje'],['planner','Agenda','planner'],['refs','Referências','film'],['coment','Coment.','coment'],['mais','Mais','more']]:[['hoje','Hoje','hoje'],['aprovar','Aprovar','check'],['seguidores','Seguidores','user'],['inbox','Direct','inbox'],['mais','Mais','more']];
