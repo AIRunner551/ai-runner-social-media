@@ -41,6 +41,12 @@ O app usa o aplicativo **Lidera Relatórios** da Meta (ID do app do Instagram `1
 - **Confiança.** Este projeto só aceita conta ou evento com a assinatura do hub, conferida com a chave pública publicada em `<hub>/ig-auth/chave`. O endereço do hub e o nome deste painel ficam na tabela `ig_interno` (`hub`, `painel`). No hub, a lista de painéis atendidos fica no segredo `IG_PAINEIS`.
 - **Dependência.** Se o projeto da Lidera sair do ar, este app continua abrindo e sincronizando de hora em hora, mas não conecta conta nova nem recebe eventos em tempo real.
 
+## Radar de referências
+
+Na tela **Referências**, cada perfil cadastrado num tema entra no radar: seguidores (e quanto cresceu em 7 dias), posts por semana, engajamento médio, taxa de engajamento, views médios dos reels e a lista de posts com os números de cada um. Tudo se atualiza sozinho a cada 6 horas e logo depois de adicionar um perfil. Um post interessante vira referência com um clique ("Guardar como referência"), e dali sai o roteiro de vocês.
+
+Os dados vêm da API oficial da Meta (Business Discovery), que só mostra **contas profissionais** (empresa ou criador). Quem faz a consulta é o projeto da Lidera (hub), com um token do Facebook do usuário do sistema "Lidera Relatórios" do BM01, guardado só lá no segredo `IG_FB_TOKEN`. Este projeto pede ao hub, assinado com a chave dele, e o hub confere a assinatura antes de responder. Estrutura no banco: `supabase/radar.sql`.
+
 ## 3. Chave do Claude
 
 A IA do app (sugestão de resposta, roteiros, legendas, análise de referências) usa o Claude pela API da Anthropic.
