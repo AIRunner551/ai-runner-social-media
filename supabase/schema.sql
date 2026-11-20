@@ -400,6 +400,19 @@ create index if not exists ig_planejados_agenda ON public.ig_planejados USING bt
 create index if not exists ig_referencias_tema ON public.ig_referencias USING btree (conta_id, tema_id, plays DESC);
 create index if not exists ig_seg_prim ON public.ig_seguidores USING btree (conta_id, primeiro_em DESC);
 
+-- ---------- segredos internos: o banco gera sozinho, ninguém digita ----------
+-- 'cron' autentica as rotinas agendadas nas funções; 'webhook' é o token de verificação que vai no painel da Meta.
+-- Só o servidor lê esta tabela (sem regra de acesso para usuários).
+create table if not exists public.ig_interno (
+  chave text primary key,
+  valor text not null
+);
+alter table public.ig_interno enable row level security;
+insert into public.ig_interno (chave, valor) values
+  ('cron', replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')),
+  ('webhook', replace(gen_random_uuid()::text, '-', ''))
+on conflict (chave) do nothing;
+
 -- ---------- funções ----------
 -- Admin = e-mail liberado em ig_acesso com papel 'admin' (no app original isso vinha de outra tabela, de outro sistema)
 create or replace function public.eh_admin() returns boolean
@@ -573,6 +586,17 @@ create policy ig_midias_del on storage.objects for delete to authenticated
 alter publication supabase_realtime add table public.ig_comentarios;
 alter publication supabase_realtime add table public.ig_conversas;
 alter publication supabase_realtime add table public.ig_mensagens;
+
+-- ---------- permissões da API ----------
+-- Projetos novos do Supabase não liberam tabelas novas para a API sozinhos. Aqui fica explícito:
+-- usuário logado acessa as tabelas do app (as regras acima decidem quais linhas); tokens e segredos, só o servidor.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on public.ig_acesso, public.ig_acoes, public.ig_automacao_envios, public.ig_automacoes, public.ig_comentarios, public.ig_contas, public.ig_conversas, public.ig_fluxos, public.ig_leads, public.ig_log, public.ig_mensagens, public.ig_midias, public.ig_perfis_ref, public.ig_planejados, public.ig_referencias, public.ig_respostas, public.ig_seguidores, public.ig_snapshots, public.ig_temas to authenticated;
+grant all on public.ig_acesso, public.ig_acoes, public.ig_automacao_envios, public.ig_automacoes, public.ig_comentarios, public.ig_contas, public.ig_conversas, public.ig_fluxos, public.ig_interno, public.ig_leads, public.ig_log, public.ig_mensagens, public.ig_midias, public.ig_perfis_ref, public.ig_planejados, public.ig_referencias, public.ig_respostas, public.ig_seguidores, public.ig_snapshots, public.ig_temas, public.ig_tokens, public.tk_tokens to service_role;
+grant usage, select on all sequences in schema public to authenticated, service_role;
+revoke all on public.ig_tokens, public.tk_tokens, public.ig_interno from anon, authenticated;
+grant execute on function public.eh_admin(), public.ig_acesso(), public.ig_acesso_total(), public.ig_contas_do_usuario() to authenticated, service_role;
+grant execute on function public.ig_inc_comentarios(text) to service_role;
 
 -- ---------- primeiro acesso ----------
 -- 1) Crie o usuário em Authentication > Users (e-mail e senha).

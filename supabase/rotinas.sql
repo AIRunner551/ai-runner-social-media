@@ -1,16 +1,17 @@
 -- AI Runner Social Media: rotinas agendadas (publicar o que está agendado, sincronizar, renovar a autorização do Instagram).
--- ANTES de rodar, troque as duas marcações abaixo:
---   SEU-PROJETO      = o código do projeto no Supabase (está no endereço: https://SEU-PROJETO.supabase.co)
---   SEGREDO_DO_CRON  = o mesmo valor que você gravou no segredo IG_CRON_SECRET das funções
--- Este arquivo, depois de preenchido, contém um segredo: não suba a versão preenchida para o GitHub.
+-- ANTES de rodar, troque SEU-PROJETO pelo código do projeto no Supabase (está no endereço: https://SEU-PROJETO.supabase.co).
+-- O segredo das rotinas não aparece aqui: o banco gerou sozinho na instalação (tabela ig_interno).
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
+insert into public.ig_interno (chave, valor) values ('url', 'https://SEU-PROJETO.supabase.co')
+on conflict (chave) do update set valor = excluded.valor;
+
 create or replace function public.ig_chamar(p_path text, p_body jsonb) returns void
-language sql security definer as $$
-  select net.http_post(url:='https://SEU-PROJETO.supabase.co/functions/v1/'||p_path,
-                       headers:='{"Content-Type":"application/json","x-cron":"SEGREDO_DO_CRON"}'::jsonb,
-                       body:=p_body, timeout_milliseconds:=120000);
+language sql security definer set search_path to 'public' as $$
+  select net.http_post(url := (select valor from public.ig_interno where chave = 'url') || '/functions/v1/' || p_path,
+                       headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron', (select valor from public.ig_interno where chave = 'cron')),
+                       body := p_body, timeout_milliseconds := 120000);
 $$;
 revoke all on function public.ig_chamar(text, jsonb) from public, anon, authenticated;
 
