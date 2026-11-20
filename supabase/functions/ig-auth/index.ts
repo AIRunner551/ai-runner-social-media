@@ -43,7 +43,17 @@ Deno.serve(async (req) => {
   if (rota === "/callback") {
     const code = url.searchParams.get("code");
     const erro = url.searchParams.get("error_description") || url.searchParams.get("error");
-    if (erro || !code) return html(pagina(`O Instagram não autorizou: ${erro || "sem code"}.`), 400);
+    // Erro na conexão: volta para o app que pediu (o deste projeto ou o do painel atendido pelo hub) com a mensagem na tela.
+    // (O Supabase entrega página HTML das funções como texto puro, então a página de erro aparecia como código.)
+    const voltar = (msg: string, status = 500) => {
+      const pp = (url.searchParams.get("state") || "").match(/^p:([A-Za-z0-9_-]+)\|/);
+      const base = pp ? painelDoHub(pp[1])?.app : APP_URL;
+      return base ? Response.redirect(`${base}/?erro_conexao=${encodeURIComponent(msg)}#contas`, 302) : html(pagina(msg), status);
+    };
+    const amigavel = (e: unknown) => /Unsupported request - method type|does not exist, cannot be loaded|missing permissions/i.test(String(e))
+      ? "O Instagram autorizou, mas esta conta ainda não pode usar o aplicativo. Aceite o convite em Instagram › Configurações › Apps e sites › Convites do testador e conecte de novo."
+      : "Não consegui concluir a conexão com o Instagram: " + String(e).replace(/^Error:\s*/, "").slice(0, 220);
+    if (erro || !code) return voltar(`O Instagram não autorizou a conexão${erro ? ": " + erro : ""}.`, 400);
     try {
       // 1) token curto
       const form = new URLSearchParams({ client_id: APP_ID, client_secret: APP_SECRET, grant_type: "authorization_code", redirect_uri: REDIRECT, code: code.replace(/#_$/, "") });
@@ -117,7 +127,7 @@ Deno.serve(async (req) => {
       return Response.redirect(`${APP_URL}/?conectado=${encodeURIComponent(me.username)}`, 302);
     } catch (e) {
       await log("erro", null, { onde: "callback", erro: String(e) });
-      return html(pagina(`Não consegui concluir a conexão: ${String(e)}`), 500);
+      return voltar(amigavel(e));
     }
   }
 
