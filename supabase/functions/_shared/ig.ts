@@ -1,11 +1,14 @@
 // AI Runner Social Media: helpers compartilhados pelas Edge Functions ig-auth, ig-webhook e ig-api.
 // API usada: "Instagram API with Instagram Login" (graph.instagram.com). Não precisa de Página do Facebook.
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk";
 
 export const GRAPH = "https://graph.instagram.com/v26.0";
 export const APP_ID = Deno.env.get("IG_APP_ID") || "";
 export const APP_SECRET = Deno.env.get("IG_APP_SECRET") || "";
 export const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || "";
+export const CLAUDE_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+export const CLAUDE_MODEL = Deno.env.get("CLAUDE_MODEL") || "claude-opus-5-5";
 export const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 // Chaves do projeto: os nomes antigos ainda existem nas funções; se saírem de linha, valem os dicionários novos do Supabase.
 function primeiraChave(nome: string): string {
@@ -113,9 +116,44 @@ export async function graphPost(path: string, token: string, body: Record<string
   return j;
 }
 
-// Gemini (mesma chave do leitor de notas do Flow)
-export async function gemini(prompt: string, opts: { json?: boolean; modelo?: string; temp?: number } = {}): Promise<string> {
-  if (!GEMINI_KEY) throw new Error("GEMINI_API_KEY não configurada");
+// ======================= IA =======================
+// O app usa o Claude quando existe o segredo ANTHROPIC_API_KEY (chave da API da Anthropic, criada no Console: platform.claude.com).
+// Sem ela, cai no Gemini (GEMINI_API_KEY). As chamadas do app continuam usando gemini(prompt, opts): o roteamento é aqui dentro.
+type OpcoesIA = { json?: boolean; modelo?: string; temp?: number; esforco?: "low" | "medium" | "high" };
+
+async function claude(prompt: string, opts: OpcoesIA = {}): Promise<string> {
+  const client = new Anthropic({ apiKey: CLAUDE_KEY, timeout: 120_000, maxRetries: 1 });
+  // Recusa por política: nos modelos que aceitam, a própria API refaz o pedido num modelo de reserva (fallbacks: "default").
+  const comReserva = /^claude-(fable-5|opus-5|sonnet-5-5)/.test(CLAUDE_MODEL);
+  try {
+    const r = await client.beta.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 16000,
+      // respostas curtas (comentário, direct, triagem) rendem bem com esforço baixo; roteiro e conteúdo pedem "medium"
+      output_config: { effort: opts.esforco || "low" },
+      ...(comReserva ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" } : {}),
+      ...(opts.json ? { system: "Responda somente com o objeto JSON pedido: sem texto antes ou depois e sem cercas de código." } : {}),
+      messages: [{ role: "user", content: prompt }],
+    });
+    if (r.stop_reason === "refusal") throw new Error("a IA recusou este pedido" + (r.stop_details?.explanation ? ": " + r.stop_details.explanation : ""));
+    const texto = r.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+    if (!texto && r.stop_reason === "max_tokens") throw new Error("a resposta da IA foi cortada pelo limite de tamanho");
+    return texto;
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) throw new Error("chave da API do Claude inválida: confira o segredo ANTHROPIC_API_KEY");
+    if (e instanceof Anthropic.PermissionDeniedError) throw new Error("a conta do Claude não tem acesso ao modelo " + CLAUDE_MODEL);
+    if (e instanceof Anthropic.NotFoundError) throw new Error("modelo do Claude não encontrado: " + CLAUDE_MODEL);
+    if (e instanceof Anthropic.RateLimitError) throw new Error("limite de uso do Claude atingido agora; tente de novo em instantes");
+    if (e instanceof Anthropic.BadRequestError) throw new Error("o Claude recusou o pedido (confira se a conta da API tem crédito): " + e.message);
+    if (e instanceof Anthropic.APIConnectionError) throw new Error("não consegui falar com o Claude (rede); tente de novo");
+    if (e instanceof Anthropic.APIError) throw new Error(`erro ${e.status} no Claude: ${e.message}`);
+    throw e;
+  }
+}
+
+export async function gemini(prompt: string, opts: OpcoesIA = {}): Promise<string> {
+  if (CLAUDE_KEY) return claude(prompt, opts);
+  if (!GEMINI_KEY) throw new Error("IA não configurada: grave a chave da API do Claude no segredo ANTHROPIC_API_KEY");
   const modelo = opts.modelo || Deno.env.get("GEMINI_MODEL") || "gemini-3-flash-preview";
   const call = async (m: string) => {
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${GEMINI_KEY}`, {
