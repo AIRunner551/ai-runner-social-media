@@ -10,46 +10,43 @@ O app nasce vazio: sem contas conectadas, sem leads e sem histórico.
 | Estrutura do banco (`schema.sql`) e rotinas agendadas (`rotinas.sql`) | Feito |
 | Quatro funções publicadas (`ig-auth`, `ig-webhook`, `ig-api`, `tiktok-auth`) | Feito |
 | Tela ligada ao projeto e publicada no GitHub Pages | Feito |
-| E-mail `comercial.airunner@gmail.com` liberado como admin | Feito |
-| Criar o usuário com senha (passo 1) | Falta |
-| Aplicativo na Meta e segredos do Instagram (passo 2) | Falta |
-| Chave do Gemini para a IA (passo 3) | Falta |
+| Usuário admin `comercial.airunner@gmail.com` convidado por e-mail | Feito, falta você criar a senha (passo 1) |
+| Aplicativo da Meta: o mesmo do Lidera Social, com o retorno do AI Runner cadastrado | Feito |
+| Segredos `IG_APP_ID` e `IG_APP_URL` | Feito |
+| Segredo `IG_APP_SECRET` (passo 2) | Falta |
+| Instagram do AI Runner como testador do aplicativo (passo 2) | Falta |
+| Chave da API do Claude, segredo `ANTHROPIC_API_KEY` (passo 3) | Falta |
 | Aplicativo no TikTok (passo 4) | Falta |
 | Razão social e CNPJ nas páginas legais (passo 5) | Falta |
 
 Endereço do app: https://airunner551.github.io/ai-runner-social-media/
 
-## 1. Criar o seu usuário
+## 1. Criar a sua senha
 
-No Supabase, em **Authentication › Users › Add user › Create new user**: e-mail `comercial.airunner@gmail.com`, uma senha sua, e marque **Auto Confirm User**. Depois é só entrar no app com esse e-mail e senha.
+O Supabase mandou um e-mail de convite para `comercial.airunner@gmail.com`. Abra o link do e-mail: ele leva ao app, que pede para você criar a sua senha. Depois é só entrar com e-mail e senha.
 
-Para liberar outra pessoa: crie o usuário dela do mesmo jeito e libere o e-mail em Playbook › Equipe (ou na tabela `ig_acesso`). O papel `cliente` enxerga só as contas marcadas para ele.
+Se o link expirar, abra o app, digite o e-mail e clique em **Esqueci minha senha**: chega um link novo.
 
-## 2. Aplicativo na Meta (Instagram)
+Para liberar outra pessoa: em Authentication › Users › Add user › Send invitation, mande o convite, e libere o e-mail em Playbook › Equipe (ou na tabela `ig_acesso`). O papel `cliente` enxerga só as contas marcadas para ele.
 
-1. Em developers.facebook.com, crie um app do tipo **Empresa** e adicione o produto **Instagram** com a opção **API setup with Instagram login**.
-2. Em **Business login settings**, cadastre o redirecionamento:
-   `https://uopovwfitfklmaiociuk.supabase.co/functions/v1/ig-auth/callback`
-3. No Supabase, em **Edge Functions › Secrets**, crie:
-   - `IG_APP_ID`: o ID do app do Instagram
-   - `IG_APP_SECRET`: a chave secreta do app do Instagram
-   - `IG_APP_URL`: `https://airunner551.github.io/ai-runner-social-media` (sem barra no fim)
-4. Em **Webhooks** (no painel da Meta), aponte para
-   `https://uopovwfitfklmaiociuk.supabase.co/functions/v1/ig-webhook`
-   O token de verificação já existe: o banco gerou sozinho. Para ver, rode no SQL Editor:
-   ```sql
-   select valor from public.ig_interno where chave = 'webhook';
-   ```
-   Assine os campos `comments`, `messages`, `message_reactions`, `messaging_postbacks` e `messaging_seen`.
-5. Permissões usadas: `instagram_business_basic`, `instagram_business_manage_messages`, `instagram_business_manage_comments`, `instagram_business_content_publish`, `instagram_business_manage_insights`.
-6. Enquanto o app estiver em modo de desenvolvimento, só entram contas cadastradas como testadoras (Funções do app › Testadores do Instagram). Para qualquer conta entrar, é preciso passar pela revisão da Meta, que pede a política de privacidade e os termos publicados:
-   - https://airunner551.github.io/ai-runner-social-media/privacidade.html
-   - https://airunner551.github.io/ai-runner-social-media/termos.html
-7. No app, clique em **Conectar conta** e entre com o Instagram do AI Runner.
+## 2. Instagram: o mesmo aplicativo da Meta do Lidera Social
 
-## 3. Chave do Gemini
+O app usa o aplicativo **Lidera Relatórios** (ID do app do Instagram `1093483376382075`). O endereço de retorno do AI Runner já está cadastrado nele e os segredos `IG_APP_ID` e `IG_APP_URL` já estão gravados. Falta:
 
-Em aistudio.google.com, gere uma chave de API e grave no Supabase como o segredo `GEMINI_API_KEY`. Sem ela o app funciona, mas as sugestões de resposta, roteiros e legendas por IA ficam desligadas.
+1. **Chave secreta.** Em developers.facebook.com › Lidera Relatórios › Casos de uso › API do Instagram › Configuração da API com login do Instagram, clique em **Mostrar** na "Chave secreta do app do Instagram" e grave o valor no Supabase do AI Runner, em Edge Functions › Secrets, com o nome `IG_APP_SECRET`.
+2. **Testador.** O aplicativo ainda não concluiu a análise da Meta, então só entram contas com função nele. Em Funções do app › Funções, adicione o Instagram do AI Runner como **Testador do Instagram** e aceite o convite no próprio Instagram (Configurações › Apps e sites › Convites para testadores).
+3. No app, clique em **Conectar conta** e entre com o Instagram do AI Runner. Na tela de autorização do Instagram vai aparecer o nome do aplicativo da Lidera.
+
+Sobre o tempo real: um aplicativo da Meta tem um único endereço de webhook, e ele aponta para o Lidera Social. O Lidera Social repassa para cá, com a assinatura original, os eventos das contas que não são dele. Sem o `IG_APP_SECRET` gravado aqui, os eventos repassados são guardados, mas as automações não disparam.
+
+## 3. Chave do Claude
+
+A IA do app (sugestão de resposta, roteiros, legendas, análise de referências) usa o Claude pela API da Anthropic.
+
+1. Entre em platform.claude.com com a conta do AI Runner e crie uma **API key**. A API é cobrada por uso e precisa de créditos; a assinatura do aplicativo Claude não vale como chave de API.
+2. Grave a chave no Supabase, em Edge Functions › Secrets, com o nome `ANTHROPIC_API_KEY`.
+
+O modelo padrão é o `claude-opus-5-5`. Para trocar, crie o segredo `CLAUDE_MODEL` com o nome do modelo (por exemplo `claude-sonnet-5-5` ou `claude-haiku-5-5`, mais baratos). Sem a chave do Claude o app funciona, mas os botões de IA respondem que a IA não está configurada.
 
 ## 4. Aplicativo no TikTok
 
@@ -79,4 +76,5 @@ Em `termos.html` e `privacidade.html`, troque o trecho entre colchetes pela raz�
 
 - Conta recém-conectada entra no modo **Conteúdo** (agenda, direct, comentários, automações, referências, métricas). O modo **Vendas** pode ser ligado em Contas › Modo, voz e pilares.
 - A voz da conta (quem é, como fala) fica em Contas › Modo, voz e pilares. Sem isso a IA se apoia só no nome e na bio do perfil.
+- Se um dia este app ganhar um aplicativo próprio na Meta, aponte o webhook dele direto para `.../functions/v1/ig-webhook`; o token de verificação sai de `select valor from public.ig_interno where chave = 'webhook';`.
 - A senha do banco foi gerada pelo Supabase na criação do projeto. O app não usa essa senha; se precisar dela, redefina em Project Settings › Database.
