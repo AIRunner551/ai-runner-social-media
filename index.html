@@ -279,6 +279,7 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
     <label>Senha</label><input id="lpass" type="password" autocomplete="current-password">
     <button class="btn btn-p" style="width:100%;justify-content:center;margin-top:20px;padding:14px" onclick="login()">Entrar</button>
     <p id="lerr" class="sm" style="color:#FF6B5E;min-height:20px;margin:12px 0 0"></p>
+    <div class="xs" style="margin:-2px 0 8px"><a href="#" onclick="esqueciSenha();return false">Esqueci minha senha</a></div>
     <div class="xs" style="margin-top:6px;line-height:1.7;color:#8A927B">Suas contas entram pelo login oficial do Instagram e do TikTok.<br>Acesso por convite: <a href="mailto:comercial.airunner@gmail.com">comercial.airunner@gmail.com</a><br><a href="termos.html" target="_blank">Termos de Uso</a> · <a href="privacidade.html" target="_blank">Política de Privacidade</a></div>
   </div>
 </div>
@@ -316,6 +317,9 @@ const SUPA_URL='https://uopovwfitfklmaiociuk.supabase.co';
 const SUPA_ANON='sb_publishable_NBVA1II9Zc91bCYq09eZ5Q_OhBbgD62';
 if(SUPA_URL.includes('COLE-AQUI'))document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementById('lerr');if(e)e.textContent='Falta configurar o projeto: preencha SUPA_URL e SUPA_ANON no index.html (veja o INSTALACAO.md).'});
 const FN=SUPA_URL+'/functions/v1';
+// chegou por link de convite ou de redefinição de senha: a pessoa cria a própria senha antes de entrar
+const LINK_SENHA=/type=(invite|recovery)/.test(location.hash);
+const LINK_ERRO=/error(_code|_description)?=/.test(location.hash);
 const sb=supabase.createClient(SUPA_URL,SUPA_ANON);
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -352,8 +356,14 @@ const avatar=(foto,nome,cls='')=>`<div class="av ${cls}">${foto?`<img src="${esc
 // ---------- auth ----------
 async function login(){$('#lerr').textContent='';const {error}=await sb.auth.signInWithPassword({email:$('#lemail').value.trim(),password:$('#lpass').value});if(error){$('#lerr').textContent='E-mail ou senha inválidos.';return}iniciar()}
 async function sair(){await sb.auth.signOut();location.reload()}
+// ---------- senha criada pela própria pessoa (convite por e-mail e "esqueci minha senha") ----------
+let senhaPendente=LINK_SENHA;
+function telaSenha(email){$('#login').style.display='grid';$('#app').style.display='none';$('#login .box').innerHTML=`<h3>Crie sua senha</h3><p class="sm" style="color:#BEC5AE;margin:6px 0 2px">${email?'Você entrou pelo link enviado para <b>'+esc(email)+'</b>. ':''}Escolha a senha que vai usar para entrar no painel.</p><label>Nova senha (8 caracteres ou mais)</label><input id="ns1" type="password" autocomplete="new-password"><label>Repita a senha</label><input id="ns2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')salvarSenha()"><button class="btn btn-p" style="width:100%;justify-content:center;margin-top:20px;padding:14px" onclick="salvarSenha()">Salvar e entrar</button><p id="lerr" class="sm" style="color:#FF6B5E;min-height:20px;margin:12px 0 0"></p>`;setTimeout(()=>$('#ns1')?.focus(),50)}
+async function salvarSenha(){const a=$('#ns1').value,b=$('#ns2').value,e=$('#lerr');e.textContent='';if(a.length<8){e.textContent='A senha precisa de pelo menos 8 caracteres.';return}if(a!==b){e.textContent='As duas senhas não são iguais.';return}const {error}=await sb.auth.updateUser({password:a});if(error){e.textContent='Não consegui salvar a senha: '+error.message;return}senhaPendente=false;history.replaceState({},'',location.pathname);location.reload()}
+async function esqueciSenha(){const email=$('#lemail').value.trim(),e=$('#lerr');if(!email){e.textContent='Digite o seu e-mail no campo acima e clique de novo em "Esqueci minha senha".';$('#lemail').focus();return}e.style.color='#BEC5AE';e.textContent='Enviando…';const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});e.textContent=error?'Não consegui enviar agora. Tente de novo em alguns minutos.':'Se este e-mail tiver acesso, enviamos um link para criar uma nova senha. Confira a caixa de entrada e o spam.';if(error)e.style.color='#FF6B5E'}
 $('#lpass').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
-async function iniciar(){const {data:{session}}=await sb.auth.getSession();if(!session){$('#login').style.display='grid';$('#app').style.display='none';return}
+async function iniciar(){const {data:{session}}=await sb.auth.getSession();if(!session){$('#login').style.display='grid';$('#app').style.display='none';if(LINK_ERRO&&$('#lerr'))$('#lerr').textContent='Este link expirou ou já foi usado. Clique em "Esqueci minha senha" para receber outro.';return}
+  if(senhaPendente){telaSenha(session.user.email);return}
   S.user=session.user;const {data:temAcesso,error:eAc}=await sb.rpc('ig_acesso');const error=!eAc&&temAcesso===false;
   if(error){$('#lerr').textContent='Sem acesso ao AI Runner Social Media. Peça para o admin liberar seu e-mail.';await sb.auth.signOut();return}
   $('#login').style.display='none';$('#app').style.display='block';$('#userLbl').textContent=(S.user.email||'').split('@')[0];
@@ -1069,7 +1079,7 @@ async function renderContas(){
 async function syncCompleto(id){toast('Sync completo iniciado (1 a 2 minutos)…',10000);try{const r=await api('/sync',{conta_id:id,completo:true});toast('Pronto: '+JSON.stringify(r[id]).slice(0,120));await carregarContas();renderContas()}catch(e){toast(e.message)}}
 async function desativar(id,ativo){await sb.from('ig_contas').update({ativo}).eq('id',id);await carregarContas();renderContas()}
 
-sb.auth.onAuthStateChange((ev)=>{if(ev==='SIGNED_OUT'){$('#login').style.display='grid';$('#app').style.display='none'}});
+sb.auth.onAuthStateChange((ev,sess)=>{if(ev==='SIGNED_OUT'){$('#login').style.display='grid';$('#app').style.display='none'}if(ev==='PASSWORD_RECOVERY'){senhaPendente=true;telaSenha(sess&&sess.user&&sess.user.email)}});
 iniciar();
 </script>
 </body>
