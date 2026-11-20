@@ -5,12 +5,29 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 export const GRAPH = "https://graph.instagram.com/v26.0";
 export const APP_ID = Deno.env.get("IG_APP_ID") || "";
 export const APP_SECRET = Deno.env.get("IG_APP_SECRET") || "";
-export const VERIFY_TOKEN = Deno.env.get("IG_WEBHOOK_VERIFY") || "";
-export const CRON_SECRET = Deno.env.get("IG_CRON_SECRET") || "";
 export const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || "";
 export const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-export const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-export const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
+// Chaves do projeto: os nomes antigos ainda existem nas funções; se saírem de linha, valem os dicionários novos do Supabase.
+function primeiraChave(nome: string): string {
+  try {
+    const j = JSON.parse(Deno.env.get(nome) || "{}");
+    const v = j && typeof j === "object" ? (j.default ?? Object.values(j)[0]) : j;
+    return typeof v === "string" ? v : String((v as { api_key?: string })?.api_key || "");
+  } catch { return ""; }
+}
+export const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || primeiraChave("SUPABASE_SECRET_KEYS");
+export const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || primeiraChave("SUPABASE_PUBLISHABLE_KEYS");
+
+// Segredos internos (rotinas agendadas e verificação do webhook): se existirem nos Secrets das funções, valem eles;
+// senão vêm da tabela ig_interno, onde o banco gera os valores sozinho na instalação. Ninguém precisa inventar nem copiar segredo.
+async function interno(chave: string): Promise<string> {
+  try {
+    const { data } = await createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } }).from("ig_interno").select("valor").eq("chave", chave).maybeSingle();
+    return String(data?.valor || "");
+  } catch { return ""; }
+}
+export const CRON_SECRET = Deno.env.get("IG_CRON_SECRET") || await interno("cron");
+export const VERIFY_TOKEN = Deno.env.get("IG_WEBHOOK_VERIFY") || await interno("webhook");
 export const APP_URL = Deno.env.get("IG_APP_URL") || "";
 
 export const SCOPES = [
