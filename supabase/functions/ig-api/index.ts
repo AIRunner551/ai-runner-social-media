@@ -215,11 +215,6 @@ async function syncConversas(id: string, tok: string, completo: boolean) {
       const idxMinha = msgs.findIndex((m) => String((m.from as Row)?.id) === id);
       const corte = Math.max(ex?.lida_em ? new Date(String(ex.lida_em)).getTime() : 0, idxMinha !== -1 ? new Date(String(msgs[idxMinha].created_time)).getTime() : 0);
       const vista = (m: Row) => new Date(String(m.created_time)).getTime() <= corte;
-      for (const m of msgs) {
-        const de_mim = String((m.from as Row)?.id) === id;
-        const tipo = m.story ? "story_reply" : ((m.attachments as Row)?.data ? "anexo" : "texto");
-        await db.from("ig_mensagens").upsert({ id: m.id, conversa_id, conta_id: id, de_mim, texto: (m.message as string) || (m.story ? "(respondeu ao story)" : "(anexo)"), tipo, anexos: (m.attachments as Row)?.data || [], criado_em: m.created_time, lido: de_mim || vista(m) }, { onConflict: "id", ignoreDuplicates: true });
-      }
       const ultima = msgs[0];
       const naoLidas = msgs.filter((m) => String((m.from as Row)?.id) !== id && !vista(m)).length;
       await db.from("ig_conversas").upsert({
@@ -228,6 +223,12 @@ async function syncConversas(id: string, tok: string, completo: boolean) {
         nao_lidas: naoLidas,
         lead_id: ex?.lead_id || null,
       });
+      // as mensagens vêm depois da conversa: a chave estrangeira exige a conversa gravada (conta nova perdia todas as mensagens no 1º sync)
+      for (const m of msgs) {
+        const de_mim = String((m.from as Row)?.id) === id;
+        const tipo = m.story ? "story_reply" : ((m.attachments as Row)?.data ? "anexo" : "texto");
+        await db.from("ig_mensagens").upsert({ id: m.id, conversa_id, conta_id: id, de_mim, texto: (m.message as string) || (m.story ? "(respondeu ao story)" : "(anexo)"), tipo, anexos: (m.attachments as Row)?.data || [], criado_em: m.created_time, lido: de_mim || vista(m) }, { onConflict: "id", ignoreDuplicates: true });
+      }
       n++;
     }
   } catch (e) { await log("erro", id, { onde: "conversas", erro: String(e).slice(0, 300) }); return String(e).slice(0, 120); }
